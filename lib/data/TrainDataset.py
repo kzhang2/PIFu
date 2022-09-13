@@ -52,12 +52,13 @@ class TrainDataset(Dataset):
     def modify_commandline_options(parser, is_train):
         return parser
 
-    def __init__(self, opt, phase='train'):
+    def __init__(self, opt=None, phase='train'):
         self.opt = opt
         self.projection_mode = 'orthogonal'
 
         # Path setup
-        self.root = self.opt.dataroot
+        # self.root = self.opt.dataroot
+        self.root = "./training-data"
         self.RENDER = os.path.join(self.root, 'RENDER')
         self.MASK = os.path.join(self.root, 'MASK')
         self.PARAM = os.path.join(self.root, 'PARAM')
@@ -71,12 +72,16 @@ class TrainDataset(Dataset):
         self.B_MAX = np.array([128, 228, 128])
 
         self.is_train = (phase == 'train')
-        self.load_size = self.opt.loadSize
+        # self.load_size = self.opt.loadSize
+        self.load_size = 512
 
-        self.num_views = self.opt.num_views
+        # self.num_views = self.opt.num_views
+        self.num_views = 1
 
-        self.num_sample_inout = self.opt.num_sample_inout
-        self.num_sample_color = self.opt.num_sample_color
+        # self.num_sample_inout = self.opt.num_sample_inout
+        self.num_sample_inout = 5000
+        # self.num_sample_color = self.opt.num_sample_color
+        self.num_sample_color = 0
 
         self.yaw_list = list(range(0,360,1))
         self.pitch_list = [0]
@@ -90,12 +95,19 @@ class TrainDataset(Dataset):
         ])
 
         # augmentation
+        # self.aug_trans = transforms.Compose([
+        #     transforms.ColorJitter(brightness=opt.aug_bri, contrast=opt.aug_con, saturation=opt.aug_sat,
+        #                            hue=opt.aug_hue)
+        # ])
         self.aug_trans = transforms.Compose([
-            transforms.ColorJitter(brightness=opt.aug_bri, contrast=opt.aug_con, saturation=opt.aug_sat,
-                                   hue=opt.aug_hue)
+            transforms.ColorJitter(brightness=0, contrast=0, saturation=0,
+                                   hue=0)
         ])
 
         self.mesh_dic = load_trimesh(self.OBJ)
+        
+        self.sigma = 5.0
+        self.random_multiview = False
 
     def get_subjects(self):
         all_subjects = os.listdir(self.RENDER)
@@ -162,9 +174,9 @@ class TrainDataset(Dataset):
             scale_intrinsic[2, 2] = scale / ortho_ratio
             # Match image pixel space to image uv space
             uv_intrinsic = np.identity(4)
-            uv_intrinsic[0, 0] = 1.0 / float(self.opt.loadSize // 2)
-            uv_intrinsic[1, 1] = 1.0 / float(self.opt.loadSize // 2)
-            uv_intrinsic[2, 2] = 1.0 / float(self.opt.loadSize // 2)
+            uv_intrinsic[0, 0] = 1.0 / float(self.load_size // 2)
+            uv_intrinsic[1, 1] = 1.0 / float(self.load_size // 2)
+            uv_intrinsic[2, 2] = 1.0 / float(self.load_size // 2)
             # Transform under image pixel space
             trans_intrinsic = np.identity(4)
 
@@ -181,13 +193,13 @@ class TrainDataset(Dataset):
                 th, tw = self.load_size, self.load_size
 
                 # random flip
-                if self.opt.random_flip and np.random.rand() > 0.5:
+                if np.random.rand() > 0.5:
                     scale_intrinsic[0, 0] *= -1
                     render = transforms.RandomHorizontalFlip(p=1.0)(render)
                     mask = transforms.RandomHorizontalFlip(p=1.0)(mask)
 
                 # random scale
-                if self.opt.random_scale:
+                if True:
                     rand_scale = random.uniform(0.9, 1.1)
                     w = int(rand_scale * w)
                     h = int(rand_scale * h)
@@ -197,7 +209,7 @@ class TrainDataset(Dataset):
                     scale_intrinsic[3, 3] = 1
 
                 # random translate in the pixel space
-                if self.opt.random_trans:
+                if True:
                     dx = random.randint(-int(round((w - tw) / 10.)),
                                         int(round((w - tw) / 10.)))
                     dy = random.randint(-int(round((h - th) / 10.)),
@@ -206,8 +218,8 @@ class TrainDataset(Dataset):
                     dx = 0
                     dy = 0
 
-                trans_intrinsic[0, 3] = -dx / float(self.opt.loadSize // 2)
-                trans_intrinsic[1, 3] = -dy / float(self.opt.loadSize // 2)
+                trans_intrinsic[0, 3] = -dx / float(self.load_size // 2)
+                trans_intrinsic[1, 3] = -dy / float(self.load_size // 2)
 
                 x1 = int(round((w - tw) / 2.)) + dx
                 y1 = int(round((h - th) / 2.)) + dy
@@ -218,9 +230,9 @@ class TrainDataset(Dataset):
                 render = self.aug_trans(render)
 
                 # random blur
-                if self.opt.aug_blur > 0.00001:
-                    blur = GaussianBlur(np.random.uniform(0, self.opt.aug_blur))
-                    render = render.filter(blur)
+                # if self.opt.aug_blur > 0.00001:
+                #     blur = GaussianBlur(np.random.uniform(0, self.opt.aug_blur))
+                #     render = render.filter(blur)
 
             intrinsic = np.matmul(trans_intrinsic, np.matmul(uv_intrinsic, scale_intrinsic))
             calib = torch.Tensor(np.matmul(intrinsic, extrinsic)).float()
@@ -251,7 +263,7 @@ class TrainDataset(Dataset):
             torch.manual_seed(1991)
         mesh = self.mesh_dic[subject]
         surface_points, _ = trimesh.sample.sample_surface(mesh, 4 * self.num_sample_inout)
-        sample_points = surface_points + np.random.normal(scale=self.opt.sigma, size=surface_points.shape)
+        sample_points = surface_points + np.random.normal(scale=self.sigma, size=surface_points.shape)
 
         # add random points within image space
         length = self.B_MAX - self.B_MIN
@@ -331,7 +343,7 @@ class TrainDataset(Dataset):
         # Samples are around the true surface with an offset
         normal = torch.Tensor(surface_normal).float()
         samples = torch.Tensor(surface_points).float() \
-                  + torch.normal(mean=torch.zeros((1, normal.size(1))), std=self.opt.sigma).expand_as(normal) * normal
+                  + torch.normal(mean=torch.zeros((1, normal.size(1))), std=self.sigma).expand_as(normal) * normal
 
         # Normalized to [-1, 1]
         rgbs_color = 2.0 * torch.Tensor(surface_colors).float() - 1.0
@@ -361,20 +373,25 @@ class TrainDataset(Dataset):
             'b_max': self.B_MAX,
         }
         render_data = self.get_render(subject, num_views=self.num_views, yid=yid, pid=pid,
-                                        random_sample=self.opt.random_multiview)
+                                        random_sample=self.random_multiview)
         res.update(render_data)
 
-        if self.opt.num_sample_inout:
+        if self.num_sample_inout:
             sample_data = self.select_sampling_method(subject)
             res.update(sample_data)
         
-        # img = np.uint8((np.transpose(render_data['img'][0].numpy(), (1, 2, 0)) * 0.5 + 0.5)[:, :, ::-1] * 255.0)
-        # rot = render_data['calib'][0,:3, :3]
-        # trans = render_data['calib'][0,:3, 3:4]
-        # pts = torch.addmm(trans, rot, sample_data['samples'][:, sample_data['labels'][0] > 0.5])  # [3, N]
-        # pts = 0.5 * (pts.numpy().T + 1.0) * render_data['img'].size(2)
-        # for p in pts:
-        #     img = cv2.circle(img, (p[0], p[1]), 2, (0,255,0), -1)
+        img = np.uint8((np.transpose(render_data['img'][0].numpy(), (1, 2, 0)) * 0.5 + 0.5)[:, :, ::-1] * 255.0)
+        rot = render_data['calib'][0,:3, :3]
+        trans = render_data['calib'][0,:3, 3:4]
+        #print(rot.shape, trans.shape)
+        #print(sample_data['samples'].shape)
+        #print(sample_data['labels'].shape)
+        pts = torch.addmm(trans, rot, sample_data['samples'][:, sample_data['labels'][0] > 0.5])  # [3, N], inside points
+        pts = 0.5 * (pts.numpy().T + 1.0) * render_data['img'].size(2)
+        for p in pts:
+            # print(p[0], p[1])
+            img = cv2.circle(img.copy(), (int(p[0]), int(p[1])), 2, (0,255,0), -1)
+        res['vis'] = img
         # cv2.imshow('test', img)
         # cv2.waitKey(1)
 

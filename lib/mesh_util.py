@@ -42,12 +42,14 @@ def reconstruction(net, cuda, calib_tensor,
 
     # Finally we do marching cubes
     try:
-        verts, faces, normals, values = measure.marching_cubes_lewiner(sdf, 0.5)
+        #verts, faces, normals, values = measure.marching_cubes_lewiner(sdf, 0.5)
+        verts, faces, normals, values = measure.marching_cubes(sdf, 0.5)
         # transform verts into world coordinate system
         verts = np.matmul(mat[:3, :3], verts.T) + mat[:3, 3:4]
         verts = verts.T
         return verts, faces, normals, values
-    except:
+    except Exception as e:
+        print(e)
         print('error cannot marching cubes')
         return -1
 
